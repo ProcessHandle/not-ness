@@ -3,31 +3,45 @@ const fs = require('fs');
 const luaparse = require('luaparse');
 
 const app = express();
-
+const port = 3000; // Ensure the API listens on port 3000
 const Table = './Pokemon.lua';
 
 app.use(express.json());
 
-// Recursive function to parse Lua table fields into a nested object
+// Recursive function to parse the full Lua table with advanced type handling
 function parseLuaTable(fields) {
     return fields.reduce((acc, field) => {
         if (field.value.type === 'tableconstructor') {
+            // Recursively parse nested tables
             acc[field.key.name] = parseLuaTable(field.value.fields);
         } else {
-            acc[field.key.name] = field.value.value;
+            const value = field.value.value;
+
+            // Handle strings
+            if (typeof value === 'string') {
+                acc[field.key.name] = value;
+
+            // Handle numbers (keep all unless explicitly 0 or invalid)
+            } else if (typeof value === 'number') {
+                acc[field.key.name] = value === 0 ? "N/A" : value;
+
+            // Handle unsupported or unknown types
+            } else {
+                acc[field.key.name] = "N/A";
+            }
         }
         return acc;
     }, {});
 }
 
-// Function to get Pokémon data
+// Function to get detailed Pokémon data
 function getPokemonData(luaTable, name) {
     try {
-        const pokemons = luaTable.body[0].init[0].fields;
-        const pokemon = pokemons.find(entry => entry.key.name === name);
+        const pokemons = luaTable.body[0].init[0].fields; // Top-level table
+        const pokemon = pokemons.find(entry => entry.key.name === name); // Find the specific Pokémon
 
         if (pokemon) {
-            return parseLuaTable(pokemon.value.fields); // Parse the entire tree
+            return parseLuaTable(pokemon.value.fields); // Parse and return the entire tree
         }
         return null;
     } catch (error) {
@@ -36,32 +50,7 @@ function getPokemonData(luaTable, name) {
     }
 }
 
-// Function to convert JavaScript object to Lua table string
-function JsToLuaString(jsobj) {
-    function escapeLuaString(value) {
-        return value.replace(/"/g, '\\"'); // Escape double quotes
-    }
-
-    let luaStr = '_G.Pokemon = {\n';
-    for (let name in jsobj) {
-        luaStr += `    ["${escapeLuaString(name)}"] = {\n`;
-        for (let key in jsobj[name]) {
-            const value = jsobj[name][key];
-            if (typeof value === 'number') {
-                luaStr += `        ${key} = ${value},\n`;
-            } else if (typeof value === 'string') {
-                luaStr += `        ${key} = "${escapeLuaString(value)}",\n`;
-            } else if (typeof value === 'object') {
-                luaStr += `        ${key} = ${JsToLuaString(value)},\n`; // Handle nested objects
-            }
-        }
-        luaStr += '    },\n';
-    }
-    luaStr += '}\n';
-    return luaStr;
-}
-
-// Endpoint to get Pokémon data
+// Endpoint to fetch Pokémon data
 app.get('/pokemon/:name', (req, res) => {
     const PokeName = req.params.name;
 
@@ -75,13 +64,13 @@ app.get('/pokemon/:name', (req, res) => {
             const PokemonData = getPokemonData(LuaParsed, PokeName);
 
             if (PokemonData) {
-                res.json(PokemonData); // Send the full tree
+                res.json(PokemonData); // Return the full tree of Pokémon data
             } else {
-                res.status(404).send('Pokémon not found in table');
+                res.status(404).send(`❌ Pokémon '${PokeName}' not found in the database.`);
             }
         } catch (parseErr) {
             console.error('Error parsing Lua file:', parseErr);
-            res.status(500).send('Error parsing Lua file');
+            res.status(500).send('Error parsing Lua file.');
         }
     });
 });
@@ -129,6 +118,7 @@ app.post('/pokemon', (req, res) => {
                 });
             }
 
+            // Convert updated data back to Lua string format
             const LuaStr = JsToLuaString(
                 LuaParsed.body[0].init[0].fields.reduce((acc, entry) => {
                     acc[entry.key.name] = entry.value.fields.reduce((obj, field) => {
@@ -143,21 +133,43 @@ app.post('/pokemon', (req, res) => {
                 if (writeErr) {
                     return res.status(500).send('Error writing Lua file');
                 }
-                res.send('Pokémon data saved successfully');
+                res.send('✅ Pokémon data saved successfully.');
             });
         } catch (parseErr) {
             console.error('Error parsing Lua file:', parseErr);
-            res.status(500).send('Error parsing Lua file');
+            res.status(500).send('Error parsing Lua file.');
         }
     });
 });
 
-// Default route
 app.get('/', (req, res) => {
-    res.send('Hello, World!');
+    res.send('Hello, World! The Pokémon API is running.');
 });
 
-const port = 3000;
 app.listen(port, '0.0.0.0', () => {
     console.log(`API is running on http://0.0.0.0:${port}`);
 });
+
+function JsToLuaString(jsobj) {
+    function escapeLuaString(value) {
+        return value.replace(/"/g, '\\"'); // Escape double quotes
+    }
+
+    let luaStr = '_G.Pokemon = {\n';
+    for (let name in jsobj) {
+        luaStr += `    ["${escapeLuaString(name)}"] = {\n`;
+        for (let key in jsobj[name]) {
+            const value = jsobj[name][key];
+            if (typeof value === 'number') {
+                luaStr += `        ${key} = ${value},\n`;
+            } else if (typeof value === 'string') {
+                luaStr += `        ${key} = "${escapeLuaString(value)}",\n`;
+            } else if (typeof value === 'object') {
+                luaStr += `        ${key} = ${JsToLuaString(value)},\n`; 
+            }
+        }
+        luaStr += '    },\n';
+    }
+    luaStr += '}\n';
+    return luaStr;
+}
