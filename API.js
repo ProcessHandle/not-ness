@@ -8,10 +8,10 @@ const Table = './Pokemon.lua';
 
 app.use(express.json());
 
-// Recursive function to parse the full Lua table with robust handling of nested tables
+// Recursive function to parse Lua tables, including nested structures and arrays
 function parseLuaTable(fields) {
     return fields.reduce((acc, field) => {
-        const keyName = field.key.name; // Key for the current field
+        const keyName = field.key.type === 'string' ? field.key.value : field.key.name; // Handle string or name keys
         const value = field.value;
 
         if (value.type === 'tableconstructor') {
@@ -23,9 +23,11 @@ function parseLuaTable(fields) {
         } else if (value.type === 'number') {
             // Handle numbers
             acc[keyName] = value.value;
+        } else if (Array.isArray(value)) {
+            // Handle arrays
+            acc[keyName] = value.map(item => (item.type === 'tableconstructor' ? parseLuaTable(item.fields) : item.value));
         } else {
-            // Unsupported types (add a warning in the logs)
-            console.warn(`Unsupported value type '${value.type}' for key '${keyName}'.`);
+            // Unsupported types (fallback to "N/A")
             acc[keyName] = "N/A";
         }
         return acc;
