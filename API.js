@@ -1,3 +1,4 @@
+// can this fucking work dude github is so ass
 const express = require('express');
 const fs = require('fs');
 
@@ -117,4 +118,3 @@ app.get('/', (req, res) => {
 app.listen(port, '0.0.0.0', () => {
     console.log(`API is running on http://0.0.0.0:${port}`);
 });
-// Can this slow ass github actually update fuck these shitty rate limits
