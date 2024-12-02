@@ -1,4 +1,4 @@
-// 5:36
+// 5:41
 const express = require('express');
 const fs = require('fs');
 const luaparse = require('luaparse');
@@ -12,21 +12,38 @@ app.use(express.json());
 // Recursive function to parse Lua table fields into a nested object
 function parseLuaTable(fields) {
     return fields.reduce((acc, field) => {
-        const keyName = field.key.type === 'identifier' ? field.key.name : field.key.value;
+        let keyName;
 
-        if (field.value.type === 'tableconstructor') {
-            acc[keyName] = parseLuaTable(field.value.fields);
-        } else if (field.value.type === 'string') {
-            acc[keyName] = field.value.value;
-        } else if (field.value.type === 'numeric') {
-            acc[keyName] = Number(field.value.value);
-        } else if (field.value.type === 'identifier') {
-            acc[keyName] = field.value.name;
-        } else if (field.value.type === 'array') {
-            acc[keyName] = field.value.value.map(v => v.value);
+        // Extract the key name
+        if (field.key.type === 'identifier') {
+            keyName = field.key.name;
+        } else if (field.key.type === 'string') {
+            keyName = field.key.value;
+        } else if (field.key.type === 'numeric') {
+            keyName = field.key.value;
         } else {
-            acc[keyName] = field.value.value;
+            return acc; // Skip unsupported key types
         }
+
+        // Extract the value
+        switch (field.value.type) {
+            case 'tableconstructor':
+                acc[keyName] = parseLuaTable(field.value.fields);
+                break;
+            case 'string':
+                acc[keyName] = field.value.value;
+                break;
+            case 'numeric':
+                acc[keyName] = Number(field.value.value);
+                break;
+            case 'boolean':
+                acc[keyName] = field.value.value === 'true';
+                break;
+            default:
+                acc[keyName] = field.value.value || null; // Ensure no undefined values
+                break;
+        }
+
         return acc;
     }, {});
 }
@@ -35,7 +52,7 @@ function parseLuaTable(fields) {
 function getPokemonData(luaTable, name) {
     try {
         const pokemons = luaTable.body[0].init[0].fields;
-        const pokemon = pokemons.find(entry => entry.key.name === name);
+        const pokemon = pokemons.find(entry => entry.key.name === name || entry.key.value === name);
 
         if (pokemon) {
             return parseLuaTable(pokemon.value.fields); // Parse the entire tree
@@ -61,6 +78,8 @@ function JsToLuaString(jsobj, indent = 0) {
             luaStr += `${innerSpaces}["${key}"] = {${value.map(v => `"${v}"`).join(', ')}},\n`;
         } else if (typeof value === 'number') {
             luaStr += `${innerSpaces}["${key}"] = ${value},\n`;
+        } else if (typeof value === 'boolean') {
+            luaStr += `${innerSpaces}["${key}"] = ${value ? 'true' : 'false'},\n`;
         } else {
             luaStr += `${innerSpaces}["${key}"] = "${value}",\n`;
         }
@@ -113,29 +132,29 @@ app.post('/pokemon', (req, res) => {
             const pokemons = LuaParsed.body[0].init[0].fields;
 
             // Check if Pokémon already exists
-            let pokemonEntry = pokemons.find(entry => entry.key.name === newPokemon.name);
+            let pokemonEntry = pokemons.find(entry => entry.key.name === newPokemon.name || entry.key.value === newPokemon.name);
 
             if (pokemonEntry) {
                 // Update existing Pokémon data
                 pokemonEntry.value.fields = Object.keys(newPokemon.data).map(key => ({
                     type: 'tablekey',
-                    key: { type: 'identifier', name: key },
+                    key: { type: 'string', value: key },
                     value: typeof newPokemon.data[key] === 'number' ? 
-                        { type: 'numeric', value: newPokemon.data[key].toString() } : 
+                        { type: 'numeric', value: newPokemon.data[key].toString() } :
                         { type: 'string', value: newPokemon.data[key] }
                 }));
             } else {
                 // Add new Pokémon
                 pokemons.push({
                     type: 'tablekey',
-                    key: { type: 'identifier', name: newPokemon.name },
+                    key: { type: 'string', value: newPokemon.name },
                     value: {
                         type: 'tableconstructor',
                         fields: Object.keys(newPokemon.data).map(key => ({
                             type: 'tablekey',
-                            key: { type: 'identifier', name: key },
+                            key: { type: 'string', value: key },
                             value: typeof newPokemon.data[key] === 'number' ? 
-                                { type: 'numeric', value: newPokemon.data[key].toString() } : 
+                                { type: 'numeric', value: newPokemon.data[key].toString() } :
                                 { type: 'string', value: newPokemon.data[key] }
                         }))
                     }
@@ -144,7 +163,7 @@ app.post('/pokemon', (req, res) => {
 
             const LuaStr = '_G.Pokemon = ' + JsToLuaString(
                 LuaParsed.body[0].init[0].fields.reduce((acc, entry) => {
-                    acc[entry.key.name] = parseLuaTable(entry.value.fields);
+                    acc[entry.key.name || entry.key.value] = parseLuaTable(entry.value.fields);
                     return acc;
                 }, {})
             );
