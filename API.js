@@ -1,4 +1,3 @@
-// 5:33
 const express = require('express');
 const fs = require('fs');
 const luaparse = require('luaparse');
@@ -12,10 +11,20 @@ app.use(express.json());
 // Recursive function to parse Lua table fields into a nested object
 function parseLuaTable(fields) {
     return fields.reduce((acc, field) => {
+        const keyName = field.key.type === 'identifier' ? field.key.name : field.key.value;
+
         if (field.value.type === 'tableconstructor') {
-            acc[field.key.name] = parseLuaTable(field.value.fields);
+            acc[keyName] = parseLuaTable(field.value.fields);
+        } else if (field.value.type === 'string') {
+            acc[keyName] = field.value.value;
+        } else if (field.value.type === 'numeric') {
+            acc[keyName] = Number(field.value.value);
+        } else if (field.value.type === 'identifier') {
+            acc[keyName] = field.value.name;
+        } else if (field.value.type === 'array') {
+            acc[keyName] = field.value.value.map(v => v.value);
         } else {
-            acc[field.key.name] = field.value.value;
+            acc[keyName] = field.value.value;
         }
         return acc;
     }, {});
@@ -38,27 +47,25 @@ function getPokemonData(luaTable, name) {
 }
 
 // Function to convert JavaScript object to Lua table string
-function JsToLuaString(jsobj) {
-    function escapeLuaString(value) {
-        return value.replace(/"/g, '\\"'); // Escape double quotes
+function JsToLuaString(jsobj, indent = 0) {
+    const spaces = ' '.repeat(indent);
+    const innerSpaces = ' '.repeat(indent + 4);
+    let luaStr = '{\n';
+
+    for (let key in jsobj) {
+        const value = jsobj[key];
+        if (typeof value === 'object' && !Array.isArray(value)) {
+            luaStr += `${innerSpaces}["${key}"] = ${JsToLuaString(value, indent + 4)},\n`;
+        } else if (Array.isArray(value)) {
+            luaStr += `${innerSpaces}["${key}"] = {${value.map(v => `"${v}"`).join(', ')}},\n`;
+        } else if (typeof value === 'number') {
+            luaStr += `${innerSpaces}["${key}"] = ${value},\n`;
+        } else {
+            luaStr += `${innerSpaces}["${key}"] = "${value}",\n`;
+        }
     }
 
-    let luaStr = '_G.Pokemon = {\n';
-    for (let name in jsobj) {
-        luaStr += `    ["${escapeLuaString(name)}"] = {\n`;
-        for (let key in jsobj[name]) {
-            const value = jsobj[name][key];
-            if (typeof value === 'number') {
-                luaStr += `        ${key} = ${value},\n`;
-            } else if (typeof value === 'string') {
-                luaStr += `        ${key} = "${escapeLuaString(value)}",\n`;
-            } else if (typeof value === 'object') {
-                luaStr += `        ${key} = ${JsToLuaString(value)},\n`; // Handle nested objects
-            }
-        }
-        luaStr += '    },\n';
-    }
-    luaStr += '}\n';
+    luaStr += `${spaces}}`;
     return luaStr;
 }
 
@@ -111,31 +118,32 @@ app.post('/pokemon', (req, res) => {
                 // Update existing Pokémon data
                 pokemonEntry.value.fields = Object.keys(newPokemon.data).map(key => ({
                     type: 'tablekey',
-                    key: { name: key },
-                    value: { type: typeof newPokemon.data[key] === 'number' ? 'number' : 'string', value: newPokemon.data[key] }
+                    key: { type: 'identifier', name: key },
+                    value: typeof newPokemon.data[key] === 'number' ? 
+                        { type: 'numeric', value: newPokemon.data[key].toString() } : 
+                        { type: 'string', value: newPokemon.data[key] }
                 }));
             } else {
                 // Add new Pokémon
                 pokemons.push({
                     type: 'tablekey',
-                    key: { name: newPokemon.name },
+                    key: { type: 'identifier', name: newPokemon.name },
                     value: {
                         type: 'tableconstructor',
                         fields: Object.keys(newPokemon.data).map(key => ({
                             type: 'tablekey',
-                            key: { name: key },
-                            value: { type: typeof newPokemon.data[key] === 'number' ? 'number' : 'string', value: newPokemon.data[key] }
+                            key: { type: 'identifier', name: key },
+                            value: typeof newPokemon.data[key] === 'number' ? 
+                                { type: 'numeric', value: newPokemon.data[key].toString() } : 
+                                { type: 'string', value: newPokemon.data[key] }
                         }))
                     }
                 });
             }
 
-            const LuaStr = JsToLuaString(
+            const LuaStr = '_G.Pokemon = ' + JsToLuaString(
                 LuaParsed.body[0].init[0].fields.reduce((acc, entry) => {
-                    acc[entry.key.name] = entry.value.fields.reduce((obj, field) => {
-                        obj[field.key.name] = field.value.value;
-                        return obj;
-                    }, {});
+                    acc[entry.key.name] = parseLuaTable(entry.value.fields);
                     return acc;
                 }, {})
             );
@@ -162,4 +170,4 @@ const port = 3000;
 
 app.listen(port, '0.0.0.0', () => {
     console.log(`API is running on http://0.0.0.0:${port}`);
-})
+});
