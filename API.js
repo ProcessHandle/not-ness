@@ -8,16 +8,24 @@ const Table = './Pokemon.lua';
 
 app.use(express.json());
 
+function parseLuaTable(fields) {
+    return fields.reduce((acc, field) => {
+        if (field.value.type === 'tableconstructor') {
+            acc[field.key.name] = parseLuaTable(field.value.fields);
+        } else {
+            acc[field.key.name] = field.value.value;
+        }
+        return acc;
+    }, {});
+}
+
 function getPokemonData(luaTable, name) {
     try {
         const pokemons = luaTable.body[0].init[0].fields;
         const pokemon = pokemons.find(entry => entry.key.name === name);
 
         if (pokemon) {
-            return pokemon.value.fields.reduce((acc, field) => {
-                acc[field.key.name] = field.value.value;
-                return acc;
-            }, {});
+            return parseLuaTable(pokemon.value.fields); // Parse the entire tree
         }
         return null;
     } catch (error) {
@@ -40,6 +48,8 @@ function JsToLuaString(jsobj) {
                 luaStr += `        ${key} = ${value},\n`;
             } else if (typeof value === 'string') {
                 luaStr += `        ${key} = "${escapeLuaString(value)}",\n`;
+            } else if (typeof value === 'object') {
+                luaStr += `        ${key} = ${JsToLuaString(value)},\n`;
             }
         }
         luaStr += '    },\n';
@@ -61,7 +71,7 @@ app.get('/pokemon/:name', (req, res) => {
             const PokemonData = getPokemonData(LuaParsed, PokeName);
 
             if (PokemonData) {
-                res.json(PokemonData);
+                res.json(PokemonData); // Send the full tree
             } else {
                 res.status(404).send('Pokémon not found in table');
             }
@@ -88,18 +98,15 @@ app.post('/pokemon', (req, res) => {
             const LuaParsed = luaparse.parse(data);
             const pokemons = LuaParsed.body[0].init[0].fields;
 
-            // Check if Pokémon already exists
             let pokemonEntry = pokemons.find(entry => entry.key.name === newPokemon.name);
 
             if (pokemonEntry) {
-                // Update existing Pokémon data
                 pokemonEntry.value.fields = Object.keys(newPokemon.data).map(key => ({
                     type: 'tablekey',
                     key: { name: key },
                     value: { type: typeof newPokemon.data[key] === 'number' ? 'number' : 'string', value: newPokemon.data[key] }
                 }));
             } else {
-                // Add new Pokémon
                 pokemons.push({
                     type: 'tablekey',
                     key: { name: newPokemon.name },
@@ -141,7 +148,6 @@ app.get('/', (req, res) => {
     res.send('Hello, World!');
 });
 
-const port = 3000;
-app.listen(port, '0.0.0.0', () => {
+app.listen(3000, '0.0.0.0', () => {
     console.log(`API is running on http://0.0.0.0:${port}`);
 });
