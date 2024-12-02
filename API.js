@@ -142,6 +142,6 @@ app.get('/', (req, res) => {
 });
 
 const port = 3000;
-app.listen(port, () => {
-    console.log(`API is running on http://localhost:${port}`);
+app.listen(port, '0.0.0.0', () => {
+    console.log(`API is running on http://0.0.0.0:${port}`);
 });
