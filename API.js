@@ -1,7 +1,6 @@
 const express = require('express');
 const fs = require('fs');
 const luaparse = require('luaparse');
-const port = 3000;
 
 const app = express();
 
@@ -158,6 +157,7 @@ app.get('/', (req, res) => {
     res.send('Hello, World!');
 });
 
+const port = 3000;
 app.listen(port, '0.0.0.0', () => {
     console.log(`API is running on http://0.0.0.0:${port}`);
 });
