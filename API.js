@@ -1,6 +1,5 @@
 const express = require('express');
 const fs = require('fs');
-const luaparse = require('luaparse');
 
 const app = express();
 const port = 3000; // Ensure the API listens on port 3000
@@ -8,49 +7,65 @@ const Table = './Pokemon.lua';
 
 app.use(express.json());
 
-// Recursive function to parse Lua tables, including nested structures and arrays
-function parseLuaTable(fields) {
-    return fields.reduce((acc, field) => {
-        const keyName = field.key.type === 'string' ? field.key.value : field.key.name; // Handle string or name keys
-        const value = field.value;
+// Custom Lua parser to handle tables, including nested structures
+function parseLuaTable(luaString) {
+    const table = {};
 
-        if (value.type === 'tableconstructor') {
-            // Recursively parse nested tables
-            acc[keyName] = parseLuaTable(value.fields);
-        } else if (value.type === 'string') {
-            // Handle strings
-            acc[keyName] = value.value;
-        } else if (value.type === 'number') {
-            // Handle numbers
-            acc[keyName] = value.value;
-        } else if (Array.isArray(value)) {
-            // Handle arrays
-            acc[keyName] = value.map(item => (item.type === 'tableconstructor' ? parseLuaTable(item.fields) : item.value));
+    // Regular expression to match Lua key-value pairs
+    const tableRegex = /\["?([\w\s]+)"?\]\s*=\s*({|".*?"|[\d.]+|true|false|null)/g;
+    let match;
+
+    while ((match = tableRegex.exec(luaString)) !== null) {
+        const key = match[1];
+        const value = match[2];
+
+        if (value === '{') {
+            // Nested table
+            const nestedTableContent = extractNestedTable(luaString, tableRegex.lastIndex);
+            table[key] = parseLuaTable(nestedTableContent);
+        } else if (value.startsWith('"')) {
+            // String value
+            table[key] = value.slice(1, -1);
+        } else if (!isNaN(Number(value))) {
+            // Numeric value
+            table[key] = Number(value);
+        } else if (value === 'true' || value === 'false') {
+            // Boolean value
+            table[key] = value === 'true';
         } else {
-            // Unsupported types (fallback to "N/A")
-            acc[keyName] = "N/A";
+            // Fallback for unsupported or unrecognized values
+            table[key] = "N/A";
         }
-        return acc;
-    }, {});
-}
-
-// Function to get detailed Pokémon data
-function getPokemonData(luaTable, name) {
-    try {
-        const pokemons = luaTable.body[0].init[0].fields; // Top-level table
-        const pokemon = pokemons.find(entry => entry.key.name === name); // Find the specific Pokémon
-
-        if (pokemon) {
-            return parseLuaTable(pokemon.value.fields); // Parse and return the entire tree
-        }
-        return null;
-    } catch (error) {
-        console.error('Error parsing Lua table structure:', error);
-        return null;
     }
+
+    return table;
 }
 
-// Endpoint to fetch Pokémon data
+// Extract the content of a nested Lua table
+function extractNestedTable(luaString, startIndex) {
+    let openBraces = 1;
+    let endIndex = startIndex;
+
+    while (openBraces > 0 && endIndex < luaString.length) {
+        const char = luaString[endIndex];
+        if (char === '{') {
+            openBraces++;
+        } else if (char === '}') {
+            openBraces--;
+        }
+        endIndex++;
+    }
+
+    return luaString.slice(startIndex, endIndex - 1); // Return content within braces
+}
+
+// Fetch Pokémon data from Lua file
+function fetchPokemonData(luaString, pokemonName) {
+    const allData = parseLuaTable(luaString);
+    return allData[pokemonName] || null; // Return the specific Pokémon's data
+}
+
+// Endpoint to fetch Pokémon data as a Lua-style table
 app.get('/pokemon/:name', (req, res) => {
     const PokeName = req.params.name;
 
@@ -59,21 +74,39 @@ app.get('/pokemon/:name', (req, res) => {
             return res.status(500).send('Error reading Lua file');
         }
 
-        try {
-            const LuaParsed = luaparse.parse(data);
-            const PokemonData = getPokemonData(LuaParsed, PokeName);
+        const pokemonData = fetchPokemonData(data, PokeName);
 
-            if (PokemonData) {
-                res.json(PokemonData); // Return the full tree of Pokémon data
-            } else {
-                res.status(404).send(`❌ Pokémon '${PokeName}' not found in the database.`);
-            }
-        } catch (parseErr) {
-            console.error('Error parsing Lua file:', parseErr);
-            res.status(500).send('Error parsing Lua file.');
+        if (pokemonData) {
+            res.setHeader('Content-Type', 'text/plain');
+            res.send(`return ${formatLuaTable(pokemonData)}`); // Return Lua-style table
+        } else {
+            res.status(404).send(`❌ Pokémon '${PokeName}' not found.`);
         }
     });
 });
+
+// Helper function to format JavaScript objects into Lua-style tables
+function formatLuaTable(obj) {
+    if (Array.isArray(obj)) {
+        // Handle arrays
+        return `{ ${obj.map(formatLuaTable).join(', ')} }`;
+    } else if (typeof obj === 'object' && obj !== null) {
+        // Handle nested objects
+        const fields = Object.entries(obj)
+            .map(([key, value]) => `["${key}"] = ${formatLuaTable(value)}`)
+            .join(', ');
+        return `{ ${fields} }`;
+    } else if (typeof obj === 'string') {
+        // Handle strings
+        return `"${obj}"`;
+    } else if (typeof obj === 'number' || typeof obj === 'boolean') {
+        // Handle numbers and booleans
+        return obj.toString();
+    } else {
+        // Fallback for unsupported types
+        return "nil";
+    }
+}
 
 // Default route
 app.get('/', (req, res) => {
