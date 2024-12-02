@@ -16,8 +16,8 @@ function parseLuaTable(luaString) {
     let match;
 
     while ((match = tableRegex.exec(luaString)) !== null) {
-        const key = match[1];
-        const value = match[2];
+        const key = match[1]; // Key name
+        const value = match[2]; // Value (nested table, string, number, etc.)
 
         if (value === '{') {
             // Nested table
@@ -117,5 +117,4 @@ app.get('/', (req, res) => {
 app.listen(port, '0.0.0.0', () => {
     console.log(`API is running on http://0.0.0.0:${port}`);
 });
-
-//SLOW
+// Can this slow ass github actually update fuck these shitty rate limits
