@@ -1,4 +1,4 @@
-// take fucking 20
+// fucking take 500
 const express = require('express');
 const fs = require('fs');
 const luaparse = require('luaparse');
@@ -15,18 +15,16 @@ function parseLuaTable(fields) {
         const key = field.key.type === 'identifier' ? field.key.name : field.key.value; // Handle keys
         const value = field.value;
 
+        console.log('Parsing field:', key, value); // Debug log for each field
+
         if (value.type === 'tableconstructor') {
-            // Recursively parse nested tables
             acc[key] = parseLuaTable(value.fields);
         } else if (value.type === 'string') {
-            // Handle strings
             acc[key] = value.value;
         } else if (value.type === 'numericliteral') {
-            // Handle numbers
             acc[key] = value.value;
         } else {
-            // Unsupported value types
-            acc[key] = "N/A";
+            acc[key] = "N/A"; // Fallback for unsupported values
         }
         return acc;
     }, {});
@@ -36,11 +34,15 @@ function parseLuaTable(fields) {
 function getPokemonData(luaTable, name) {
     try {
         const pokemons = luaTable.body[0].init[0].fields; // Top-level Lua table
+
+        console.log('Parsed Lua Table:', JSON.stringify(pokemons, null, 2)); // Debug log to check structure
+
         const pokemonEntry = pokemons.find(entry => entry.key.name === name);
 
         if (pokemonEntry) {
             return parseLuaTable(pokemonEntry.value.fields); // Parse the full Pokémon data
         }
+        console.warn(`Pokemon '${name}' not found! Available keys:`, pokemons.map(e => e.key.name || e.key.value)); // Debug log
         return null; // Pokémon not found
     } catch (error) {
         console.error('Error parsing Lua table:', error);
