@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const luaparse = require('luaparse');
+const port = 3000;
 
 const app = express();
 
@@ -8,6 +9,7 @@ const Table = './Pokemon.lua';
 
 app.use(express.json());
 
+// Recursive function to parse Lua table fields into a nested object
 function parseLuaTable(fields) {
     return fields.reduce((acc, field) => {
         if (field.value.type === 'tableconstructor') {
@@ -19,6 +21,7 @@ function parseLuaTable(fields) {
     }, {});
 }
 
+// Function to get Pokémon data
 function getPokemonData(luaTable, name) {
     try {
         const pokemons = luaTable.body[0].init[0].fields;
@@ -34,6 +37,7 @@ function getPokemonData(luaTable, name) {
     }
 }
 
+// Function to convert JavaScript object to Lua table string
 function JsToLuaString(jsobj) {
     function escapeLuaString(value) {
         return value.replace(/"/g, '\\"'); // Escape double quotes
@@ -49,7 +53,7 @@ function JsToLuaString(jsobj) {
             } else if (typeof value === 'string') {
                 luaStr += `        ${key} = "${escapeLuaString(value)}",\n`;
             } else if (typeof value === 'object') {
-                luaStr += `        ${key} = ${JsToLuaString(value)},\n`;
+                luaStr += `        ${key} = ${JsToLuaString(value)},\n`; // Handle nested objects
             }
         }
         luaStr += '    },\n';
@@ -58,6 +62,7 @@ function JsToLuaString(jsobj) {
     return luaStr;
 }
 
+// Endpoint to get Pokémon data
 app.get('/pokemon/:name', (req, res) => {
     const PokeName = req.params.name;
 
@@ -82,6 +87,7 @@ app.get('/pokemon/:name', (req, res) => {
     });
 });
 
+// Endpoint to update or add Pokémon data
 app.post('/pokemon', (req, res) => {
     const newPokemon = req.body;
 
@@ -98,15 +104,18 @@ app.post('/pokemon', (req, res) => {
             const LuaParsed = luaparse.parse(data);
             const pokemons = LuaParsed.body[0].init[0].fields;
 
+            // Check if Pokémon already exists
             let pokemonEntry = pokemons.find(entry => entry.key.name === newPokemon.name);
 
             if (pokemonEntry) {
+                // Update existing Pokémon data
                 pokemonEntry.value.fields = Object.keys(newPokemon.data).map(key => ({
                     type: 'tablekey',
                     key: { name: key },
                     value: { type: typeof newPokemon.data[key] === 'number' ? 'number' : 'string', value: newPokemon.data[key] }
                 }));
             } else {
+                // Add new Pokémon
                 pokemons.push({
                     type: 'tablekey',
                     key: { name: newPokemon.name },
@@ -144,10 +153,11 @@ app.post('/pokemon', (req, res) => {
     });
 });
 
+// Default route
 app.get('/', (req, res) => {
     res.send('Hello, World!');
 });
 
-app.listen(3000, '0.0.0.0', () => {
+app.listen(port, '0.0.0.0', () => {
     console.log(`API is running on http://0.0.0.0:${port}`);
 });
